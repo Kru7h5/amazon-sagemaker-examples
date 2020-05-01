@@ -98,13 +98,6 @@ def keras_model_fn(learning_rate, weight_decay, optimizer, momentum, mpi=False, 
     return model
 
 
-def get_filenames(channel_name, channel):
-    if channel_name in ['train', 'validation', 'eval']:
-        return [os.path.join(channel, channel_name + '.tfrecords')]
-    else:
-        raise ValueError('Invalid data subset "%s"' % channel_name)
-
-
 def train_input_fn():
     return _input(args.epochs, args.batch_size, args.train, 'train')
 
@@ -117,20 +110,27 @@ def validation_input_fn():
     return _input(args.epochs, args.batch_size, args.validation, 'validation')
 
 
+def _get_filenames(channel_name, channel):
+    if channel_name in ['train', 'validation', 'eval']:
+        return [os.path.join(channel, channel_name + '.tfrecords')]
+    else:
+        raise ValueError('Invalid data subset "%s"' % channel_name)
+
+
 def _input(epochs, batch_size, channel, channel_name):
     """Uses the tf.data input pipeline for CIFAR-10 dataset."""
     mode = args.data_config[channel_name]['TrainingInputMode']
-    filenames = get_filenames(channel_name, channel)
-
-    # Repeat infinitely.
     logging.info("Running {} in {} mode".format(channel_name, mode))
+
     if mode == 'Pipe':
         from sagemaker_tensorflow import PipeModeDataset
         dataset = PipeModeDataset(channel=channel_name, record_format='TFRecord')
     else:
+        filenames = _get_filenames(channel_name, channel)
         dataset = tf.data.TFRecordDataset(filenames)
 
-    dataset = dataset.repeat(epochs)
+    # Repeat infinitely.
+    dataset = dataset.repeat()
     dataset = dataset.prefetch(10)
 
     # Parse records.
@@ -144,7 +144,7 @@ def _input(epochs, batch_size, channel, channel_name):
 
     # Batch it up.
     dataset = dataset.batch(batch_size, drop_remainder=True)
-    iterator = dataset.make_one_shot_iterator()
+    iterator = tf.compat.v1.data.make_one_shot_iterator(dataset)
     image_batch, label_batch = iterator.get_next()
 
     return {INPUT_TENSOR_NAME: image_batch}, label_batch
